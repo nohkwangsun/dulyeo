@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { markdownToParagraphs, splitSentences, parseScript } from '../server/text.js';
+import { markdownToParagraphs, splitSentences, parseScript } from '../src/lib/text.js';
 
 test('markdown is reduced to speakable paragraphs', () => {
   const md = `---

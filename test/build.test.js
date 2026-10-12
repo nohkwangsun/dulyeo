@@ -1,23 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fakeProvider } from '../server/providers.js';
-import { buildAudio } from '../server/build.js';
-import { silence, duration } from '../server/mp3.js';
-
-const hasFfmpeg = (() => { try { execFileSync('ffprobe', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
-
-function probeDuration(buf) {
-  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dulyeo-')), 'a.mp3');
-  fs.writeFileSync(f, buf);
-  return Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString());
-}
+import { buildAudio } from '../src/lib/build.js';
+import { silence, duration } from '../src/lib/mp3.js';
+import { hasFfmpeg, probeDuration, toneMp3 } from './helpers.js';
 
 const paragraphs = [{ sentences: ['Hello there.', 'How are you today?'] }, { sentences: ['I am fine.'] }];
-const synth = (s) => fakeProvider().synth(s);
+const synth = async (s) => toneMp3(s);
 
 test('repeat and gap are baked into the timeline', { skip: !hasFfmpeg }, async () => {
   const r = await buildAudio({ paragraphs, synth, options: { unit: 'sentence', repeat: 2, gap: 1 } });
@@ -35,4 +23,11 @@ test('computed duration matches the real decoded duration', { skip: !hasFfmpeg }
 
 test('silence frames have the requested length', { skip: !hasFfmpeg }, () => {
   assert.ok(Math.abs(probeDuration(silence(2)) - 2) < 0.1);
+});
+
+test('identical sentences are synthesized once', async () => {
+  let calls = 0;
+  await buildAudio({ paragraphs: [{ sentences: ['Same.', 'Same.', 'Other.'] }], options: { repeat: 3 },
+    synth: async (s) => { calls++; return new Uint8Array(600); } });
+  assert.equal(calls, 2);
 });

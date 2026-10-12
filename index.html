@@ -4,11 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14171c">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon.svg">
 <title>Dulyeo</title>
-<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
@@ -32,7 +31,25 @@
       <label class="btn">파일 열기<input id="file" type="file" accept=".md,.markdown,.txt,text/*" hidden></label>
     </div>
     <label>제목 <input id="title" placeholder="비워두면 첫 문장"></label>
-    <label>목소리 <select id="voice"></select></label>
+    <label>음성 엔진
+      <select id="engine">
+        <option value="azure">Azure Speech (무료 구간, 최고 음질, 만들 때 인터넷 필요)</option>
+        <option value="system">안드로이드 내장 음성 (무료, 오프라인, 앱 설치판만)</option>
+      </select>
+    </label>
+    <div id="azure-box">
+      <label>목소리 <select id="azureVoice"></select></label>
+      <details id="azure-keys">
+        <summary>Azure 키 설정</summary>
+        <label>Speech 리소스 키 <input id="azureKey" type="password" autocomplete="off"></label>
+        <label>지역(region) <input id="azureRegion" placeholder="예: koreacentral, eastus"></label>
+        <p class="muted">키는 이 기기에만 저장됩니다. README의 "Azure 키 발급"을 참고하세요.</p>
+      </details>
+    </div>
+    <div id="system-box" hidden>
+      <label>목소리 <select id="systemVoice"></select></label>
+      <button id="ttsSettings" type="button">음성 설치/설정 열기</button>
+    </div>
     <label>반복 단위
       <select id="unit">
         <option value="sentence">문장 단위</option>
@@ -42,11 +59,6 @@
     <label>반복 횟수 <input id="repeat" type="number" min="1" max="10" value="1"></label>
     <label>간격(초) <input id="gap" type="number" min="0" max="10" step="0.1" value="0.5"></label>
     <label class="check"><input id="shadow" type="checkbox"> 따라 말하기 간격 추가 (문장 길이만큼 더 쉼)</label>
-    <details>
-      <summary>서버 설정</summary>
-      <label>서버 주소 <input id="server" placeholder="비워두면 이 페이지의 서버"></label>
-      <label>액세스 토큰 <input id="token" type="password" autocomplete="off"></label>
-    </details>
     <button id="make" class="primary">mp3 만들기</button>
     <p id="status" class="muted" role="status"></p>
   </section>
@@ -78,6 +90,6 @@
 </section>
 
 <audio id="audio" preload="auto"></audio>
-<script type="module" src="app.js"></script>
+<script type="module" src="/src/main.js"></script>
 </body>
 </html>

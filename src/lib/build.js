@@ -1,5 +1,6 @@
 // Turns parsed paragraphs into one mp3 + a timeline, baking in repeats and gaps.
-import { silence, duration, stripId3 } from './mp3.js';
+// Runs in the browser (and in Node for tests): no Buffer, no filesystem.
+import { silence, duration, stripId3, concat } from './mp3.js';
 
 const SENTENCE_GAP = 0.3;     // between sentences inside a paragraph-unit
 const PARAGRAPH_PAUSE = 0.6;  // extra pause when the paragraph changes
@@ -42,8 +43,8 @@ async function mapPool(items, concurrency, fn) {
 
 /**
  * @param paragraphs [{sentences}]
- * @param synth      async (sentence, workerIndex) => mp3 Buffer
- * @returns { mp3: Buffer, timeline: [{unit, rep, start, end}], units: [{text, paragraph}] }
+ * @param synth      async (sentence, workerIndex) => mp3 bytes (Uint8Array)
+ * @returns { mp3: Uint8Array, timeline: [{unit, rep, start, end}], units: [{text, paragraph}] }
  */
 export async function buildAudio({ paragraphs, synth, options, concurrency = 4, onProgress = () => {} }) {
   const opt = normalizeOptions(options);
@@ -65,7 +66,7 @@ export async function buildAudio({ paragraphs, synth, options, concurrency = 4, 
     if (ui > 0 && units[ui - 1].paragraph !== u.paragraph) push(silence(PARAGRAPH_PAUSE));
     const body = [];
     u.sentences.forEach((s, i) => { if (i) body.push(silence(SENTENCE_GAP)); body.push(clips.get(s)); });
-    const clip = Buffer.concat(body);
+    const clip = concat(body);
     for (let rep = 0; rep < opt.repeat; rep++) {
       const start = t;
       push(clip);
@@ -75,7 +76,7 @@ export async function buildAudio({ paragraphs, synth, options, concurrency = 4, 
   });
 
   return {
-    mp3: Buffer.concat(parts),
+    mp3: concat(parts),
     timeline,
     units: units.map(({ text, paragraph }) => ({ text, paragraph })),
     options: opt,

@@ -1,4 +1,14 @@
-// Dulyeo client: create mp3 on the server, keep it on the device, play it in the background.
+// Dulyeo client: build mp3 on the phone, keep it on the device, play it in the background.
+import './style.css';
+import { registerSW } from './lib/sw.js';
+import { parseScript } from './lib/text.js';
+import { buildAudio } from './lib/build.js';
+import { duration } from './lib/mp3.js';
+import { putTrack, getTrack, delTrack, allTracks, withClipCache } from './lib/db.js';
+import { azureEngine, AZURE_VOICES } from './lib/engines/azure.js';
+import { systemEngine, getPlugin } from './lib/engines/system.js';
+import { MediaSession } from '@jofr/capacitor-media-session';
+
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
 
@@ -8,29 +18,6 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const apiUrl = (path) => (store.get('server').replace(/\/$/, '') || '') + path;
-const authHeaders = () => (store.get('token') ? { Authorization: `Bearer ${store.get('token')}` } : {});
-
-/* ---------- IndexedDB (tracks with their mp3 blobs) ---------- */
-const db = new Promise((resolve, reject) => {
-  const req = indexedDB.open('dulyeo', 1);
-  req.onupgradeneeded = () => req.result.createObjectStore('tracks', { keyPath: 'id' });
-  req.onsuccess = () => resolve(req.result);
-  req.onerror = () => reject(req.error);
-});
-async function tx(mode, fn) {
-  const d = await db;
-  return new Promise((resolve, reject) => {
-    const t = d.transaction('tracks', mode);
-    const r = fn(t.objectStore('tracks'));
-    t.oncomplete = () => resolve(r.result);
-    t.onerror = () => reject(t.error);
-  });
-}
-const putTrack = (t) => tx('readwrite', (s) => s.put(t));
-const getTrack = (id) => tx('readonly', (s) => s.get(id));
-const delTrack = (id) => tx('readwrite', (s) => s.delete(id));
-const allTracks = () => tx('readonly', (s) => s.getAll());
 
 /* ---------- tabs & library ---------- */
 function showTab(name) {
@@ -65,69 +52,86 @@ async function renderLibrary() {
 }
 
 /* ---------- create ---------- */
-const FIELDS = ['voice', 'unit', 'repeat', 'gap'];
+const nativePlugin = getPlugin();           // only inside the Android app
+const FIELDS = ['engine', 'azureKey', 'azureRegion', 'azureVoice', 'unit', 'repeat', 'gap'];
 for (const f of FIELDS) { const v = store.get('f:' + f); if (v) $(f).value = v; $(f).addEventListener('change', () => store.set('f:' + f, $(f).value)); }
 $('shadow').checked = store.get('f:shadow') === '1';
 $('shadow').addEventListener('change', () => store.set('f:shadow', $('shadow').checked ? '1' : '0'));
-for (const f of ['server', 'token']) { $(f).value = store.get(f); $(f).addEventListener('input', () => store.set(f, $(f).value)); }
 
-fetch(apiUrl('/api/voices'), { headers: authHeaders() }).then((r) => r.json()).then((voices) => {
-  const saved = store.get('f:voice');
-  $('voice').replaceChildren(...voices.map((v) => new Option(v.label, v.id, false, v.id === saved)));
-}).catch(() => { $('voice').replaceChildren(new Option('en-US-AriaNeural', 'en-US-AriaNeural')); });
+$('azure-keys').open = !store.get('f:azureKey');   // first run: show where to enter the key
+$('azureVoice').replaceChildren(...AZURE_VOICES.map((v) => new Option(v.label, v.id)));
+$('azureVoice').value = store.get('f:azureVoice') || AZURE_VOICES[0].id;
+
+if (!nativePlugin) {
+  $('engine').querySelector('option[value=system]').disabled = true;
+  if ($('engine').value === 'system') $('engine').value = 'azure';
+}
+async function loadSystemVoices() {
+  if (!nativePlugin) return;
+  try {
+    const { voices } = await nativePlugin.getVoices();
+    const saved = store.get('f:systemVoice');
+    $('systemVoice').replaceChildren(new Option('기본 음성', ''), ...voices.map((v) => new Option(`${v.name} (${v.lang})${v.offline ? '' : ' · 온라인'}`, v.id, false, v.id === saved)));
+  } catch { /* plugin not ready */ }
+}
+$('systemVoice').addEventListener('change', () => store.set('f:systemVoice', $('systemVoice').value));
+$('ttsSettings').addEventListener('click', () => nativePlugin?.openTtsSettings());
+function syncEngineUi() {
+  const sys = $('engine').value === 'system';
+  $('azure-box').hidden = sys;
+  $('system-box').hidden = !sys;
+}
+$('engine').addEventListener('change', syncEngineUi);
+syncEngineUi();
+loadSystemVoices();
+
+function currentEngine() {
+  if ($('engine').value === 'system') return systemEngine({ voice: $('systemVoice').value });
+  return azureEngine({ key: $('azureKey').value, region: $('azureRegion').value, voice: $('azureVoice').value });
+}
 
 $('paste').addEventListener('click', async () => {
   try { $('script').value = await navigator.clipboard.readText(); }
-  catch { $('status').textContent = '클립보드 권한이 없어요. 입력창에 길게 눌러 직접 붙여넣어 주세요.'; }
+  catch { $('status').textContent = '클립보드 권한이 없어요. 입력창을 길게 눌러 직접 붙여넣어 주세요.'; }
 });
 $('file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (f) { $('script').value = await f.text(); if (!$('title').value) $('title').value = f.name.replace(/\.\w+$/, ''); }
 });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 $('make').addEventListener('click', async () => {
   const markdown = $('script').value.trim();
   if (!markdown) { $('status').textContent = '스크립트를 입력해 주세요.'; return; }
   const options = { unit: $('unit').value, repeat: +$('repeat').value, gap: +$('gap').value, shadow: $('shadow').checked };
   $('make').disabled = true;
+  let wake;
   try {
-    $('status').textContent = '요청 중…';
-    let r = await fetch(apiUrl('/api/jobs'), { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ markdown, voice: $('voice').value, options }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `서버 오류 ${r.status}`);
-    const { id } = await r.json();
-
-    for (;;) {
-      await sleep(700);
-      r = await fetch(apiUrl(`/api/jobs/${id}`), { headers: authHeaders() });
-      const job = await r.json();
-      if (job.status === 'error') throw new Error(job.error);
-      if (job.status === 'done') break;
-      $('status').textContent = job.total ? `음성 생성 중… ${job.done}/${job.total} 문장` : '준비 중…';
-    }
-
-    $('status').textContent = '내려받는 중…';
-    const [meta, mp3] = await Promise.all([
-      fetch(apiUrl(`/api/jobs/${id}/timeline`), { headers: authHeaders() }).then((x) => x.json()),
-      fetch(apiUrl(`/api/jobs/${id}/audio`), { headers: authHeaders() }).then((x) => { if (!x.ok) throw new Error('mp3 다운로드 실패'); return x.blob(); }),
-    ]);
-    const first = meta.units[0]?.text || 'Untitled';
-    const o = meta.options;
-    const track = {
-      id, createdAt: Date.now(), title: $('title').value.trim() || first.slice(0, 40),
-      duration: meta.duration, timeline: meta.timeline, units: meta.units, blob: mp3,
+    const paragraphs = parseScript(markdown);
+    if (!paragraphs.length) throw new Error('읽을 문장이 없습니다.');
+    const engine = withClipCache(currentEngine());
+    wake = await navigator.wakeLock?.request('screen').catch(() => null);   // keep generating while the screen is on
+    $('status').textContent = '준비 중…';
+    const result = await buildAudio({
+      paragraphs, options, synth: engine.synth, concurrency: engine.concurrency,
+      onProgress: (done, total) => { $('status').textContent = `음성 생성 중… ${done}/${total} 문장 (화면을 켜 두세요)`; },
+    });
+    const first = result.units[0]?.text || 'Untitled';
+    const o = result.options;
+    await putTrack({
+      id: crypto.randomUUID(), createdAt: Date.now(), title: $('title').value.trim() || first.slice(0, 40),
+      duration: duration(result.mp3), timeline: result.timeline, units: result.units,
+      blob: new Blob([result.mp3], { type: 'audio/mpeg' }),
       optionsLabel: `${o.unit === 'paragraph' ? '문단' : '문장'} ×${o.repeat}${o.shadow ? ' · 쉐도잉' : ''}`,
-    };
-    await putTrack(track);
+    });
     $('status').textContent = '';
     $('script').value = ''; $('title').value = '';
     showTab('library');
-    openTrack(id);
+    const newest = (await allTracks()).sort((a, b) => b.createdAt - a.createdAt)[0];
+    openTrack(newest.id);
   } catch (err) {
     $('status').textContent = `실패: ${err.message}`;
   } finally {
+    wake?.release?.();
     $('make').disabled = false;
   }
 });
@@ -182,12 +186,15 @@ audio.addEventListener('timeupdate', () => {
     if (audio.currentTime >= e.end) audio.currentTime = e.start;
   }
   render();
-  if ('mediaSession' in navigator && audio.duration) {
-    try { navigator.mediaSession.setPositionState({ duration: audio.duration, position: Math.min(audio.currentTime, audio.duration), playbackRate: audio.playbackRate }); } catch { /* unsupported */ }
+  if (audio.duration) {
+    MediaSession.setPositionState({ duration: audio.duration, position: Math.min(audio.currentTime, audio.duration), playbackRate: audio.playbackRate }).catch(() => {});
   }
   if (Date.now() - lastSave > 5000) { lastSave = Date.now(); store.set('pos:' + track.id, audio.currentTime); }
 });
-for (const ev of ['play', 'pause']) audio.addEventListener(ev, render);
+for (const ev of ['play', 'pause']) audio.addEventListener(ev, () => {
+  render();
+  MediaSession.setPlaybackState({ playbackState: audio.paused ? 'paused' : 'playing' }).catch(() => {});
+});
 audio.addEventListener('ended', () => { if (track) store.set('pos:' + track.id, 0); render(); });
 
 const togglePlay = () => (audio.paused ? audio.play() : audio.pause());
@@ -214,18 +221,15 @@ $('seek').addEventListener('change', () => { audio.currentTime = +$('seek').valu
 $('close').addEventListener('click', () => { audio.pause(); $('player').hidden = true; });
 
 function setupMediaSession() {
-  if (!('mediaSession' in navigator)) return;
-  navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: 'Dulyeo', album: 'English listening',
-    artwork: [{ src: 'icon.svg', sizes: '512x512', type: 'image/svg+xml' }] });
+  MediaSession.setMetadata({ title: track.title, artist: 'Dulyeo', album: 'English listening',
+    artwork: [{ src: new URL('icon.svg', location.href).href, sizes: '512x512', type: 'image/svg+xml' }] }).catch(() => {});
   const handlers = {
     play: () => audio.play(), pause: () => audio.pause(),
     previoustrack: prevUnit, nexttrack: nextUnit,
-    seekbackward: (d) => jump(-(d.seekOffset || 10)), seekforward: (d) => jump(d.seekOffset || 10),
+    seekbackward: (d) => jump(-(d?.seekOffset || 10)), seekforward: (d) => jump(d?.seekOffset || 10),
     seekto: (d) => { audio.currentTime = d.seekTime; },
   };
-  for (const [action, fn] of Object.entries(handlers)) {
-    try { navigator.mediaSession.setActionHandler(action, fn); } catch { /* action unsupported */ }
-  }
+  for (const [action, fn] of Object.entries(handlers)) MediaSession.setActionHandler({ action }, fn).catch(() => {});
 }
 
 document.addEventListener('keydown', (e) => {
@@ -235,5 +239,5 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'ArrowRight') nextUnit();
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+registerSW();
 renderLibrary();
