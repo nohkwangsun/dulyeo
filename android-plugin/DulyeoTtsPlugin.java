@@ -71,7 +71,10 @@ public class DulyeoTtsPlugin extends Plugin {
                     @Override public void onError(String utteranceId, int errorCode) { finish(utteranceId, "음성 합성에 실패했습니다. (코드 " + errorCode + ")"); }
                 });
             }
-            for (Runnable r : toRun) r.run();
+            // An exception escaping here would take the whole app down (main thread), so isolate each task.
+            for (Runnable r : toRun) {
+                try { r.run(); } catch (Exception e) { /* the task reports its own failure to its call */ }
+            }
         });
     }
 
@@ -138,6 +141,7 @@ public class DulyeoTtsPlugin extends Plugin {
     @PluginMethod
     public void getVoices(PluginCall call) {
         withTts(call, () -> {
+          try {
             JSArray arr = new JSArray();
             Set<Voice> voices = tts.getVoices();
             if (voices != null) {
@@ -160,6 +164,10 @@ public class DulyeoTtsPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("voices", arr);
             call.resolve(ret);
+          } catch (Exception e) {
+            // some engines throw from getVoices(); report instead of crashing
+            call.reject("음성 목록을 가져오지 못했습니다: " + e.getMessage());
+          }
         });
     }
 

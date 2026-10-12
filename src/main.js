@@ -9,6 +9,7 @@ import { azureEngine, AZURE_VOICES } from './lib/engines/azure.js';
 import { systemEngine, getPlugin } from './lib/engines/system.js';
 import { MediaSession } from '@jofr/capacitor-media-session';
 import { Clipboard } from '@capacitor/clipboard';
+import { mediaMetadata } from './lib/media.js';
 
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
@@ -248,8 +249,7 @@ $('seek').addEventListener('change', () => { audio.currentTime = +$('seek').valu
 $('close').addEventListener('click', () => { audio.pause(); $('player').hidden = true; });
 
 function setupMediaSession() {
-  MediaSession.setMetadata({ title: track.title, artist: 'Dulyeo', album: 'English listening',
-    artwork: [{ src: new URL('icon.svg', location.href).href, sizes: '512x512', type: 'image/svg+xml' }] }).catch(() => {});
+  MediaSession.setMetadata(mediaMetadata(track)).catch(() => {});
   const handlers = {
     play: () => audio.play(), pause: () => audio.pause(),
     previoustrack: prevUnit, nexttrack: nextUnit,
