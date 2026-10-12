@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Dulyeo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Dulyeo</h1>
+  <nav>
+    <button data-tab="library" class="active">라이브러리</button>
+    <button data-tab="create">만들기</button>
+  </nav>
+</header>
+
+<main>
+  <section id="tab-library">
+    <ul id="tracks"></ul>
+    <p id="empty" class="muted">아직 저장된 트랙이 없어요. <b>만들기</b>에서 스크립트를 붙여넣어 보세요.</p>
+  </section>
+
+  <section id="tab-create" hidden>
+    <textarea id="script" placeholder="영어 스크립트(마크다운 가능)를 붙여넣으세요" rows="9"></textarea>
+    <div class="row">
+      <button id="paste">클립보드에서 붙여넣기</button>
+      <label class="btn">파일 열기<input id="file" type="file" accept=".md,.markdown,.txt,text/*" hidden></label>
+    </div>
+    <label>제목 <input id="title" placeholder="비워두면 첫 문장"></label>
+    <label>목소리 <select id="voice"></select></label>
+    <label>반복 단위
+      <select id="unit">
+        <option value="sentence">문장 단위</option>
+        <option value="paragraph">문단 단위</option>
+      </select>
+    </label>
+    <label>반복 횟수 <input id="repeat" type="number" min="1" max="10" value="1"></label>
+    <label>간격(초) <input id="gap" type="number" min="0" max="10" step="0.1" value="0.5"></label>
+    <label class="check"><input id="shadow" type="checkbox"> 따라 말하기 간격 추가 (문장 길이만큼 더 쉼)</label>
+    <details>
+      <summary>서버 설정</summary>
+      <label>서버 주소 <input id="server" placeholder="비워두면 이 페이지의 서버"></label>
+      <label>액세스 토큰 <input id="token" type="password" autocomplete="off"></label>
+    </details>
+    <button id="make" class="primary">mp3 만들기</button>
+    <p id="status" class="muted" role="status"></p>
+  </section>
+</main>
+
+<section id="player" hidden>
+  <button id="close" aria-label="닫기">⌄</button>
+  <h2 id="p-title"></h2>
+  <p id="p-text" class="sentence"></p>
+  <input id="seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="재생 위치">
+  <div class="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+  <div class="controls">
+    <button id="prev" aria-label="이전 문장">⏮</button>
+    <button id="back" aria-label="10초 뒤로">↺10</button>
+    <button id="play" class="primary round" aria-label="재생">▶</button>
+    <button id="fwd" aria-label="10초 앞으로">10↻</button>
+    <button id="next" aria-label="다음 문장">⏭</button>
+  </div>
+  <div class="row">
+    <label>속도
+      <select id="speed">
+        <option>0.5</option><option>0.6</option><option>0.7</option><option>0.8</option><option>0.9</option>
+        <option selected>1</option><option>1.1</option><option>1.25</option><option>1.5</option>
+      </select>
+    </label>
+    <label class="check"><input id="loop" type="checkbox"> 전체 반복</label>
+    <label class="check"><input id="hold" type="checkbox"> 이 문장만 반복</label>
+  </div>
+</section>
+
+<audio id="audio" preload="auto"></audio>
+<script type="module" src="app.js"></script>
+</body>
+</html>

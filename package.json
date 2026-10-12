@@ -1,0 +1,16 @@
+{
+  "name": "dulyeo",
+  "version": "0.1.0",
+  "description": "Turn English scripts (markdown) into mp3 and listen to them hands-free: repeat, gaps, speed.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "TTS_PROVIDER=fake node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "msedge-tts": "^2.0.9"
+  }
+}
