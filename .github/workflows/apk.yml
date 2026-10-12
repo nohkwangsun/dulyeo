@@ -108,6 +108,21 @@ jobs:
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk "out/dulyeo-${{ steps.version.outputs.name }}-debug.apk"
 
+      # Without the real key, still prove that the release pipeline (assembleRelease + zipalign + apksigner)
+      # works, using a throwaway key. The result is discarded; it only guards against surprises on the first real release.
+      - name: Smoke-test release signing (throwaway key)
+        if: steps.mode.outputs.signed != 'true'
+        env:
+          KEYSTORE_PASSWORD: smoketest
+          KEY_PASSWORD: smoketest
+          KEY_ALIAS: smoke
+        run: |
+          (cd android && ./gradlew --no-daemon assembleRelease)
+          keytool -genkeypair -keystore "$RUNNER_TEMP/smoke.keystore" -alias smoke -keyalg RSA -keysize 2048 \
+            -validity 1 -storepass smoketest -keypass smoketest -dname "CN=smoke"
+          KEYSTORE_PATH="$RUNNER_TEMP/smoke.keystore" scripts/sign-apk.sh \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/smoke-signed.apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: dulyeo-apk
