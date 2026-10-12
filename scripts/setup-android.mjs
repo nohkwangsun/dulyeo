@@ -43,6 +43,14 @@ if (add.length) {
   fs.writeFileSync(manifestPath, manifest);
 }
 
+// CI passes the release version; locally it stays 1 / "1.0".
+const gradlePath = path.join(root, 'android/app/build.gradle');
+let gradle = fs.readFileSync(gradlePath, 'utf8');
+const { DULYEO_VERSION_CODE: code, DULYEO_VERSION_NAME: name } = process.env;
+if (code) gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${Number(code)}`);
+if (name) gradle = gradle.replace(/versionName\s+"[^"]*"/, `versionName "${name.replace(/"/g, '')}"`);
+fs.writeFileSync(gradlePath, gradle);
+
 run('npx cap sync android');
 console.log(`
 Android project ready.

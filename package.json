@@ -12,10 +12,13 @@
     "android:setup": "node scripts/setup-android.mjs",
     "android:sync": "vite build && cap sync android"
   },
-  "engines": { "node": ">=20.19" },
+  "engines": {
+    "node": ">=20.19"
+  },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
     "@capacitor/android": "^6.2.0",
+    "@capacitor/clipboard": "^6.0.3",
     "@capacitor/core": "^6.2.0",
     "@jofr/capacitor-media-session": "^4.0.0"
   },

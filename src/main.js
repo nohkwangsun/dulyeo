@@ -8,6 +8,7 @@ import { putTrack, getTrack, delTrack, allTracks, withClipCache } from './lib/db
 import { azureEngine, AZURE_VOICES } from './lib/engines/azure.js';
 import { systemEngine, getPlugin } from './lib/engines/system.js';
 import { MediaSession } from '@jofr/capacitor-media-session';
+import { Clipboard } from '@capacitor/clipboard';
 
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
@@ -28,8 +29,11 @@ function showTab(name) {
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
+let libraryOrder = [];       // track ids in the order shown; "auto-play next" follows it
+
 async function renderLibrary() {
   const tracks = (await allTracks()).sort((a, b) => b.createdAt - a.createdAt);
+  libraryOrder = tracks.map((t) => t.id);
   const ul = $('tracks');
   ul.replaceChildren();
   $('empty').hidden = tracks.length > 0;
@@ -41,12 +45,16 @@ async function renderLibrary() {
     meta.firstChild.textContent = t.title;
     meta.lastChild.textContent = `${fmt(t.duration)} · ${t.optionsLabel}`;
     meta.addEventListener('click', () => openTrack(t.id));
+    const edit = document.createElement('button');
+    edit.textContent = '편집';
+    edit.disabled = !t.markdown;
+    edit.addEventListener('click', () => { $('script').value = t.markdown; $('title').value = t.title; showTab('create'); });
     const del = document.createElement('button');
     del.textContent = '삭제';
     del.addEventListener('click', async () => {
       if (confirm(`"${t.title}" 삭제할까요?`)) { await delTrack(t.id); localStorage.removeItem('pos:' + t.id); renderLibrary(); }
     });
-    li.append(meta, del);
+    li.append(meta, edit, del);
     ul.append(li);
   }
 }
@@ -91,8 +99,12 @@ function currentEngine() {
 }
 
 $('paste').addEventListener('click', async () => {
-  try { $('script').value = await navigator.clipboard.readText(); }
-  catch { $('status').textContent = '클립보드 권한이 없어요. 입력창을 길게 눌러 직접 붙여넣어 주세요.'; }
+  try {
+    const { value, type } = await Clipboard.read();
+    if (!value || !String(type || 'text/plain').startsWith('text')) throw new Error('no text');
+    $('script').value = value;
+  }
+  catch { $('status').textContent = '클립보드에서 텍스트를 읽지 못했어요. 입력창을 길게 눌러 직접 붙여넣어 주세요.'; }
 });
 $('file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -119,7 +131,7 @@ $('make').addEventListener('click', async () => {
     const o = result.options;
     await putTrack({
       id: crypto.randomUUID(), createdAt: Date.now(), title: $('title').value.trim() || first.slice(0, 40),
-      duration: duration(result.mp3), timeline: result.timeline, units: result.units,
+      markdown, duration: duration(result.mp3), timeline: result.timeline, units: result.units,
       blob: new Blob([result.mp3], { type: 'audio/mpeg' }),
       optionsLabel: `${o.unit === 'paragraph' ? '문단' : '문장'} ×${o.repeat}${o.shadow ? ' · 쉐도잉' : ''}`,
     });
@@ -163,14 +175,17 @@ async function openTrack(id) {
   audio.playbackRate = +$('speed').value;
   audio.preservesPitch = true;
   const pos = +store.get('pos:' + id, '0');
-  audio.addEventListener('loadedmetadata', () => { if (pos && pos < audio.duration - 2) audio.currentTime = pos; render(); }, { once: true });
+  audio.addEventListener('loadedmetadata', () => { if (pos && pos < trackDuration() - 2) audio.currentTime = pos; render(); }, { once: true });
   setupMediaSession();
   audio.play().catch(() => {});
 }
 
+// Some engines report Infinity/NaN for a moment while a blob loads; the saved length is always right.
+const trackDuration = () => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : track.duration);
+
 function render() {
   if (!track) return;
-  const t = audio.currentTime, d = audio.duration || track.duration;
+  const t = audio.currentTime, d = trackDuration();
   const e = entryAt(t);
   $('p-text').textContent = track.units[e.unit].text;
   $('cur').textContent = fmt(t); $('dur').textContent = fmt(d);
@@ -186,19 +201,29 @@ audio.addEventListener('timeupdate', () => {
     if (audio.currentTime >= e.end) audio.currentTime = e.start;
   }
   render();
-  if (audio.duration) {
-    MediaSession.setPositionState({ duration: audio.duration, position: Math.min(audio.currentTime, audio.duration), playbackRate: audio.playbackRate }).catch(() => {});
-  }
+  const d = trackDuration();
+  MediaSession.setPositionState({ duration: d, position: Math.min(audio.currentTime, d), playbackRate: audio.playbackRate }).catch(() => {});
   if (Date.now() - lastSave > 5000) { lastSave = Date.now(); store.set('pos:' + track.id, audio.currentTime); }
 });
 for (const ev of ['play', 'pause']) audio.addEventListener(ev, () => {
   render();
+  // 'pause' fires right before 'ended'; keep the notification/foreground service alive when another track follows
+  if (audio.ended && nextTrackId()) return;
   MediaSession.setPlaybackState({ playbackState: audio.paused ? 'paused' : 'playing' }).catch(() => {});
 });
-audio.addEventListener('ended', () => { if (track) store.set('pos:' + track.id, 0); render(); });
+const nextTrackId = () => {
+  if (!track || !$('auto').checked || $('loop').checked) return null;
+  return libraryOrder[libraryOrder.indexOf(track.id) + 1] ?? null;
+};
+audio.addEventListener('ended', () => {
+  if (!track) return;
+  store.set('pos:' + track.id, 0);
+  const next = nextTrackId();
+  if (next) openTrack(next); else render();
+});
 
 const togglePlay = () => (audio.paused ? audio.play() : audio.pause());
-const jump = (dt) => { audio.currentTime = Math.min(Math.max(0, audio.currentTime + dt), audio.duration || 1e9); };
+const jump = (dt) => { audio.currentTime = Math.min(Math.max(0, audio.currentTime + dt), trackDuration()); };
 function prevUnit() {
   const e = entryAt(audio.currentTime);
   const startOfUnit = firstStarts[e.unit];
@@ -216,6 +241,8 @@ $('prev').addEventListener('click', prevUnit);
 $('next').addEventListener('click', nextUnit);
 $('speed').addEventListener('change', () => { audio.playbackRate = +$('speed').value; store.set('speed', $('speed').value); });
 $('loop').addEventListener('change', () => { audio.loop = $('loop').checked; });
+$('auto').checked = store.get('f:auto', '1') === '1';
+$('auto').addEventListener('change', () => store.set('f:auto', $('auto').checked ? '1' : '0'));
 $('seek').addEventListener('input', () => { seeking = true; $('cur').textContent = fmt($('seek').value); });
 $('seek').addEventListener('change', () => { audio.currentTime = +$('seek').value; seeking = false; });
 $('close').addEventListener('click', () => { audio.pause(); $('player').hidden = true; });
