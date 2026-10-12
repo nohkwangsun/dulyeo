@@ -5,17 +5,18 @@
 
 ## 다운로드 (Android APK)
 
-폰 브라우저로 아래 링크를 열면 **`.apk` 파일이 바로 내려받아집니다**(zip 아님). 링크는 항상 같은 주소입니다.
+폰 브라우저로 아래 링크를 열면 **`.apk` 파일이 바로 내려받아집니다**(zip 아님). 링크는 항상 같은 주소이고, 빌드할 때마다 같은 주소의 파일이 최신 APK로 바뀝니다.
 
-| 용도 | 고정 다운로드 링크 |
-|---|---|
-| **안정판** (`main`의 최신 빌드) | https://github.com/nohkwangsun/dulyeo/releases/download/latest/dulyeo.apk |
-| 미리보기 (PR·브랜치의 최신 빌드) | https://github.com/nohkwangsun/dulyeo/releases/download/preview/dulyeo-preview.apk |
-| 모든 버전 목록 | https://github.com/nohkwangsun/dulyeo/releases |
+| 링크 | 무엇이 들어 있나 | 상태 |
+|---|---|---|
+| **https://github.com/nohkwangsun/dulyeo/releases/download/preview/dulyeo-preview.apk** | PR·브랜치의 최신 빌드 | ✅ 지금 사용 가능 |
+| https://github.com/nohkwangsun/dulyeo/releases/download/latest/dulyeo.apk | `main`의 최신 빌드(안정판) | ⏳ PR을 `main`에 머지하면 생성됨(그 전에는 404) |
+| https://github.com/nohkwangsun/dulyeo/releases | 모든 릴리스와 빌드 정보 | ✅ |
 
+- **최신 빌드인지 확인하는 법:** 릴리스 페이지의 제목(`Preview build (0.2.0-build.N)`)이나, 설치한 앱의 **설정 탭 맨 아래 버전**(`Dulyeo 0.2.0-build.N`)을 보세요. N이 클수록 새 빌드입니다.
 - 처음 한 번 "출처를 알 수 없는 앱 설치"를 허용해야 합니다.
-- **업데이트:** 같은 링크에서 다시 받아 설치하면 저장된 트랙을 유지한 채 덮어써집니다.
-- `latest`는 `main`에 머지/푸시될 때마다, `preview`는 PR·브랜치가 갱신될 때마다 자동으로 새 APK로 바뀝니다. 아직 `main`에 머지하기 전이라면 `preview` 링크를 쓰세요.
+- **업데이트:** 같은 링크에서 다시 받아 설치하면 저장된 트랙과 설정을 유지한 채 덮어써집니다. 파일 이름에 `(1)`이 붙어도 괜찮습니다.
+- 기본 브랜치가 `main`이 되고 첫 머지가 끝나면, 일상적으로는 `latest` 링크를 쓰면 됩니다.
 
 ## 동작 방식
 
