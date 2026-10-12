@@ -1,3 +1,5 @@
 node_modules/
 dist/
 android/
+# your own release key must never be committed (the public fallback key lives in android-signing/)
+/dulyeo.keystore

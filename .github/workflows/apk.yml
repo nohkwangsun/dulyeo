@@ -1,9 +1,13 @@
 name: Android APK
 
-# PRs and branches: build a debug APK you can download from the run page.
-# main: build a signed APK and publish it as the rolling "latest" release.
-# tags v*: build a signed APK and publish a versioned release.
-# Signed builds need the four ANDROID_* secrets (see README, "APK 자동 빌드").
+# Every build ends up as a plain .apk attached to a GitHub Release, at a fixed URL:
+#   push to main      -> release "latest"   -> /releases/download/latest/dulyeo.apk
+#   PR / other branch -> release "preview"  -> /releases/download/preview/dulyeo-preview.apk
+#   tag v*            -> release "<tag>"    -> /releases/download/<tag>/dulyeo-<version>.apk
+#
+# Signing: main and tags use your own key when the four ANDROID_* secrets exist (see README).
+# Everything else, and everything while the secrets are missing, uses the public key in
+# android-signing/, so the signature stays the same from build to build and phones accept updates.
 
 on:
   pull_request:
@@ -24,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      signed: ${{ steps.mode.outputs.signed }}
+      key: ${{ steps.mode.outputs.key }}
       version: ${{ steps.version.outputs.name }}
     env:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
@@ -49,14 +53,14 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json', 'scripts/setup-android.mjs') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: Decide build mode
+      - name: Pick the signing key
         id: mode
         run: |
-          # Never sign (or touch secrets) for pull requests.
-          if [ "$HAS_KEYSTORE" = "true" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "signed=true" >> "$GITHUB_OUTPUT"
+          # Your own key is only ever used for main and release tags; PRs and branches get the public one.
+          if [ "$HAS_KEYSTORE" = "true" ] && { [ "$GITHUB_REF" = "refs/heads/main" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; }; then
+            echo "key=release" >> "$GITHUB_OUTPUT"
           else
-            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "key=public" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Compute version
@@ -78,12 +82,11 @@ jobs:
       - run: npm run android:setup
 
       - name: Build release APK
-        if: steps.mode.outputs.signed == 'true'
         working-directory: android
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Sign release APK
-        if: steps.mode.outputs.signed == 'true'
+      - name: Sign with your release key
+        if: steps.mode.outputs.key == 'release'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -97,81 +100,75 @@ jobs:
             "out/dulyeo-${{ steps.version.outputs.name }}.apk"
           rm -f "$RUNNER_TEMP/release.keystore"
 
-      - name: Build debug APK
-        if: steps.mode.outputs.signed != 'true'
-        working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
-
-      - name: Collect debug APK
-        if: steps.mode.outputs.signed != 'true'
+      - name: Sign with the public key
+        if: steps.mode.outputs.key == 'public'
+        env:
+          KEYSTORE_PATH: android-signing/debug.keystore
+          KEYSTORE_PASSWORD: android
+          KEY_PASSWORD: android
+          KEY_ALIAS: androiddebugkey
         run: |
           mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk "out/dulyeo-${{ steps.version.outputs.name }}-debug.apk"
+          scripts/sign-apk.sh \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk \
+            "out/dulyeo-${{ steps.version.outputs.name }}.apk"
 
-      # Without the real key, still prove that the release pipeline (assembleRelease + zipalign + apksigner)
-      # works, using a throwaway key. The result is discarded; it only guards against surprises on the first real release.
-      - name: Smoke-test release signing (throwaway key)
-        if: steps.mode.outputs.signed != 'true'
-        env:
-          KEYSTORE_PASSWORD: smoketest
-          KEY_PASSWORD: smoketest
-          KEY_ALIAS: smoke
-        run: |
-          (cd android && ./gradlew --no-daemon assembleRelease)
-          keytool -genkeypair -keystore "$RUNNER_TEMP/smoke.keystore" -alias smoke -keyalg RSA -keysize 2048 \
-            -validity 1 -storepass smoketest -keypass smoketest -dname "CN=smoke"
-          KEYSTORE_PATH="$RUNNER_TEMP/smoke.keystore" scripts/sign-apk.sh \
-            android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/smoke-signed.apk"
-
+      # Only used to hand the file to the publish job; the download place is the Release, not this artifact.
       - uses: actions/upload-artifact@v4
         with:
           name: dulyeo-apk
           path: out/*.apk
           if-no-files-found: error
-          retention-days: 30
-
-      - name: Summary
-        run: |
-          {
-            echo "### Dulyeo ${{ steps.version.outputs.name }}"
-            if [ "${{ steps.mode.outputs.signed }}" = "true" ]; then
-              echo "Signed release APK built."
-            else
-              echo "**Debug APK** (signature changes every build, so it cannot update an installed copy)."
-              echo "Add the ANDROID_* secrets to get signed, updatable builds: see README."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          retention-days: 3
 
   publish:
     needs: build
-    if: >-
-      needs.build.outputs.signed == 'true' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    # Forks cannot write releases; everything else publishes.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
+    concurrency:
+      group: release-${{ github.ref == 'refs/heads/main' && 'latest' || startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'preview' }}
+      cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.build.outputs.version }}
+      KEY: ${{ needs.build.outputs.key }}
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dulyeo-apk
           path: out
 
-      - name: Publish tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish the APK to a GitHub Release
         run: |
-          gh release create "$GITHUB_REF_NAME" "out/dulyeo-$VERSION.apk" \
-            --repo "$GITHUB_REPOSITORY" --title "Dulyeo $VERSION" --generate-notes
+          repo="$GITHUB_REPOSITORY"
+          base="https://github.com/$repo/releases/download"
+          if [ "$KEY" = "release" ]; then sign="your release key"; else sign="the public key in android-signing/"; fi
+          notes="Build $VERSION from ${SHA::7}. Signed with $sign. Install over the existing app to update (your saved tracks are kept)."
 
-      - name: Publish rolling "latest" release
-        if: github.ref == 'refs/heads/main'
-        run: |
-          cp "out/dulyeo-$VERSION.apk" out/dulyeo.apk
-          gh release delete latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create latest out/dulyeo.apk \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "Latest build ($VERSION)" \
-            --notes "Built from ${GITHUB_SHA::7} on main. Install over the existing app to update. Direct link: https://github.com/$GITHUB_REPOSITORY/releases/download/latest/dulyeo.apk"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            asset="dulyeo-$VERSION.apk"
+            gh release create "$GITHUB_REF_NAME" "out/$asset" --repo "$repo" --title "Dulyeo $VERSION" --generate-notes
+            url="$base/$GITHUB_REF_NAME/$asset"
+          else
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              tag=latest; asset=dulyeo.apk; title="Latest build ($VERSION)"; flags=""
+            else
+              tag=preview; asset=dulyeo-preview.apk; title="Preview build ($VERSION)"; flags="--prerelease"
+            fi
+            cp "out/dulyeo-$VERSION.apk" "out/$asset"
+            # Recreate the release so the tag follows the newest commit; the download URL stays the same.
+            gh release delete "$tag" --repo "$repo" --cleanup-tag --yes || true
+            gh release create "$tag" "out/$asset" --repo "$repo" --target "$SHA" --title "$title" $flags --notes "$notes"
+            url="$base/$tag/$asset"
+          fi
+
+          echo "APK: $url"
+          {
+            echo "### Dulyeo $VERSION"
+            echo "Download: $url"
+          } >> "$GITHUB_STEP_SUMMARY"

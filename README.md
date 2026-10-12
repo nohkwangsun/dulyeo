@@ -3,6 +3,20 @@
 영어 스크립트(마크다운/클립보드 텍스트)를 **폰 안에서** mp3로 만들고, 같은 앱에서 바로 들을 수 있는 독립 앱입니다.
 서버가 없습니다. 출퇴근길에 화면을 끄고 음악 앱처럼 듣는 것이 목표입니다.
 
+## 다운로드 (Android APK)
+
+폰 브라우저로 아래 링크를 열면 **`.apk` 파일이 바로 내려받아집니다**(zip 아님). 링크는 항상 같은 주소입니다.
+
+| 용도 | 고정 다운로드 링크 |
+|---|---|
+| **안정판** (`main`의 최신 빌드) | https://github.com/nohkwangsun/dulyeo/releases/download/latest/dulyeo.apk |
+| 미리보기 (PR·브랜치의 최신 빌드) | https://github.com/nohkwangsun/dulyeo/releases/download/preview/dulyeo-preview.apk |
+| 모든 버전 목록 | https://github.com/nohkwangsun/dulyeo/releases |
+
+- 처음 한 번 "출처를 알 수 없는 앱 설치"를 허용해야 합니다.
+- **업데이트:** 같은 링크에서 다시 받아 설치하면 저장된 트랙을 유지한 채 덮어써집니다.
+- `latest`는 `main`에 머지/푸시될 때마다, `preview`는 PR·브랜치가 갱신될 때마다 자동으로 새 APK로 바뀝니다. 아직 `main`에 머지하기 전이라면 `preview` 링크를 쓰세요.
+
 ## 동작 방식
 
 ```
@@ -38,19 +52,24 @@
 
 ## APK 자동 빌드 (GitHub Actions)
 
-푸시할 때마다 GitHub가 APK를 만들어 줍니다. 폰에서는 **링크 하나로 설치/업데이트**하면 됩니다.
+푸시할 때마다 GitHub가 APK를 만들어 **Release에 `.apk` 파일로 올립니다**(Actions의 Artifacts는 zip이라 다운로드 위치로 쓰지 않습니다). 위치는 위 "다운로드" 표의 고정 링크입니다.
 
-| 언제 | 결과 |
-|---|---|
-| PR / 다른 브랜치 | 디버그 APK를 실행 페이지의 Artifacts에서 내려받기 (테스트용) |
-| `main`에 푸시 | 서명된 APK를 **`latest` 릴리스**에 올려 덮어씀 → 고정 링크 `https://github.com/<소유자>/dulyeo/releases/download/latest/dulyeo.apk` |
-| `v1.2.0` 같은 태그 | 서명된 APK를 버전 릴리스로 발행 |
+| 언제 | 올라가는 곳 | 파일 |
+|---|---|---|
+| `main`에 푸시/머지 | Release `latest` (덮어씀) | `dulyeo.apk` |
+| PR·다른 브랜치 갱신 | Release `preview` (덮어씀, 같은 저장소의 PR만) | `dulyeo-preview.apk` |
+| `v1.2.0` 같은 태그 | Release `v1.2.0` (보존) | `dulyeo-1.2.0.apk` |
 
-`ci.yml`은 모든 PR/푸시에서 테스트와 웹 빌드를 돌립니다.
+각 실행의 요약(Summary)에도 다운로드 링크가 찍힙니다. `ci.yml`은 모든 PR/푸시에서 테스트와 웹 빌드를 돌립니다.
+버전 코드는 빌드 번호로 자동 증가해서 폰이 항상 업데이트로 인식합니다.
 
-### 최초 1회: 서명 키 만들기 (업데이트 설치에 필수)
+### 서명 키 (선택, 권장)
 
-폰은 **같은 키로 서명된 APK만 기존 앱의 업데이트로** 받아 줍니다. 키가 없으면 빌드마다 서명이 달라져서 매번 지우고 다시 설치해야 합니다.
+폰은 **같은 키로 서명된 APK만 업데이트로** 받아 줍니다. 그래서 키는 항상 고정되어 있어야 하고, 두 가지 방식이 있습니다.
+
+1. **기본(설정 불필요):** 저장소의 공개 키(`android-signing/debug.keystore`)로 서명합니다. 바로 쓸 수 있고 업데이트도 됩니다.
+   다만 공개 키라서 이론상 누구나 같은 키로 서명한 APK를 만들 수 있습니다. **위 링크가 아닌 곳에서 받은 APK는 설치하지 마세요.**
+2. **내 키(권장):** 아래처럼 본인 키를 시크릿으로 등록하면 `main`과 태그 빌드는 그 키로 서명합니다(PR·브랜치 빌드는 항상 공개 키).
 
 ```sh
 scripts/make-keystore.sh          # JDK의 keytool 필요. dulyeo.keystore 생성 + 등록할 값을 출력
@@ -65,13 +84,12 @@ scripts/make-keystore.sh          # JDK의 keytool 필요. dulyeo.keystore 생�
 | `ANDROID_KEY_PASSWORD` | 같은 비밀번호 |
 | `ANDROID_KEY_ALIAS` | `dulyeo` |
 
-> `dulyeo.keystore` 파일은 **반드시 따로 백업**하세요(저장소에 커밋하지 마세요). 잃어버리면 이후 업데이트를 설치할 수 없습니다.
-> 시크릿이 없으면 `main` 푸시도 디버그 APK만 만들고 릴리스는 올리지 않습니다. PR에서는 시크릿을 쓰지 않습니다.
+> **키를 바꾸면(공개 키 → 내 키) 폰에서 앱을 한 번 지우고 다시 설치해야 합니다.** 처음부터 내 키를 쓸 계획이면 첫 설치 전에 등록하세요.
+> `dulyeo.keystore` 파일은 **반드시 따로 백업**하세요(저장소에 커밋하지 마세요, `.gitignore`에 들어 있습니다). 잃어버리면 이후 업데이트를 설치할 수 없습니다.
 
-### 폰에서 설치/업데이트
-1. 폰 브라우저에서 위 `latest` 링크(또는 Releases 페이지)를 열어 `dulyeo.apk`를 받습니다.
-2. 처음 한 번 "출처를 알 수 없는 앱 설치"를 허용합니다.
-3. 이후 업데이트는 같은 링크에서 다시 받아 설치하면 **데이터(저장된 트랙)가 유지된 채** 덮어써집니다. 버전 코드는 빌드 번호로 자동 증가합니다.
+### 기본 브랜치 설정
+
+저장소 Settings > Branches에서 **기본 브랜치를 `main`으로** 바꿔 두세요. 지금은 처음 푸시한 작업 브랜치가 기본으로 잡혀 있어서, 저장소 첫 화면에 `main`의 README가 보이지 않습니다.
 
 ## Android 앱(APK) 직접 만들기
 
@@ -107,7 +125,8 @@ npm test
 | `src/main.js` | UI: 만들기, 라이브러리, 플레이어, 미디어 세션 |
 | `android-plugin/` | 내장 TTS를 노출하는 Capacitor 플러그인(Java) |
 | `scripts/setup-android.mjs` | android 프로젝트 생성/패치(버전 주입 포함) |
-| `scripts/sign-apk.sh`, `make-keystore.sh` | APK 정렬·서명, 서명 키 생성 |
+| `scripts/sign-apk.sh`, `make-keystore.sh` | APK 정렬·서명, 내 서명 키 생성 |
+| `android-signing/` | 시크릿이 없을 때 쓰는 공개 폴백 서명 키 |
 | `.github/workflows/` | `ci.yml`(테스트), `apk.yml`(APK 빌드·릴리스) |
 
 모든 엔진의 출력은 24kHz·48kbps·모노 MP3로 통일되어 있어 바이트 이어붙이기만으로 합칩니다.
