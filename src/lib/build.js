@@ -2,8 +2,8 @@
 // Runs in the browser (and in Node for tests): no Buffer, no filesystem.
 import { silence, duration, stripId3, concat } from './mp3.js';
 
-const SENTENCE_GAP = 0.3;     // between sentences inside a paragraph-unit
-const PARAGRAPH_PAUSE = 0.6;  // extra pause when the paragraph changes
+export const SENTENCE_GAP = 0.3;     // between sentences inside a paragraph-unit
+export const PARAGRAPH_PAUSE = 0.6;  // extra pause when the paragraph changes
 
 export const DEFAULTS = { unit: 'sentence', repeat: 1, gap: 0.5, shadow: false };
 
@@ -28,11 +28,12 @@ export function toUnits(paragraphs, unit) {
   return units;
 }
 
-async function mapPool(items, concurrency, fn) {
+async function mapPool(items, concurrency, fn, signal) {
   const results = new Array(items.length);
   let next = 0;
   const worker = async (w) => {
     while (next < items.length) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const i = next++;
       results[i] = await fn(items[i], i, w);
     }
@@ -46,7 +47,7 @@ async function mapPool(items, concurrency, fn) {
  * @param synth      async (sentence, workerIndex) => mp3 bytes (Uint8Array)
  * @returns { mp3: Uint8Array, timeline: [{unit, rep, start, end}], units: [{text, paragraph}] }
  */
-export async function buildAudio({ paragraphs, synth, options, concurrency = 4, onProgress = () => {} }) {
+export async function buildAudio({ paragraphs, synth, options, concurrency = 4, onProgress = () => {}, signal }) {
   const opt = normalizeOptions(options);
   const units = toUnits(paragraphs, opt.unit);
   const unique = [...new Set(units.flatMap((u) => u.sentences))];
@@ -55,7 +56,8 @@ export async function buildAudio({ paragraphs, synth, options, concurrency = 4, 
   await mapPool(unique, concurrency, async (s, _i, w) => {
     clips.set(s, stripId3(await synth(s, w)));
     onProgress(++done, unique.length);
-  });
+  }, signal);
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
   const parts = [];
   const timeline = [];
